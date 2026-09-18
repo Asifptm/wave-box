@@ -15,13 +15,13 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: "256kb" }));
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static("public"));
 
 const route = (path, handler) => {
   app.get(path, (req, res) => handler(req, res));
   app.post(path, (req, res) => handler(req, res));
 };
 
-route("/", handleRoot);
 route("/api", handleRoot);
 route("/api/request", handleRequest);
 route("/api/health", handleHealth);
