@@ -1,3 +1,4 @@
+const path = require("path");
 const express = require("express");
 const {
   handleRoot,
@@ -15,7 +16,8 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: "256kb" }));
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static("public"));
+
+const publicDir = path.join(__dirname, "public");
 
 const route = (path, handler) => {
   app.get(path, (req, res) => handler(req, res));
@@ -47,10 +49,16 @@ app.post("/api/playlist/:browseId", (req, res) =>
   handlePlaylist(req, res, req.params.browseId)
 );
 
+app.get("/", (_req, res) => {
+  res.sendFile(path.join(publicDir, "index.html"));
+});
+
+app.use(express.static(publicDir));
+
 app.use((_req, res) => {
   res.status(404).json({
     status: 404,
-    message: "Not found. GET / for API documentation.",
+    message: "Not found. GET / for the home page or /api for API documentation.",
     response: null,
   });
 });
@@ -65,7 +73,7 @@ app.use((err, _req, res, _next) => {
 });
 
 const server = app.listen(PORT, () => {
-  console.log(`Wavebox API at http://localhost:${PORT}`);
+  console.log(`Wavebox at http://localhost:${PORT}/  (API: /api)`);
 });
 
 server.on("error", (err) => {
