@@ -45,6 +45,7 @@ Future<void> loadMusic() async {
     final songs = await api.searchSongs('pathaan');
     for (final song in songs) {
       debugPrint('${song.title} — ${song.artist} (${song.duration.label})');
+      debugPrint('videoId: ${song.videoId}'); // use for custom player
       debugPrint(song.thumbnail.url ?? '');
     }
 
@@ -57,7 +58,13 @@ Future<void> loadMusic() async {
 }
 ```
 
-## 4. Base URL per environment (optional)
+## 4. Custom player (search API → play `videoId`)
+
+The API returns metadata and **`videoId`**, not a direct audio file URL. Use a hidden YouTube iframe player and your own UI (play/pause, queue, art from `thumbnail.url`).
+
+Full Flutter example (widget + `youtube_player_iframe`): see **[Custom player section in the root README](../README.md#flutter--call-api-and-play-in-a-custom-player)**.
+
+## 5. Base URL per environment (optional)
 
 ```dart
 const baseUrl = String.fromEnvironment(
