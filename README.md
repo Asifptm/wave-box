@@ -1,6 +1,8 @@
 # Wavebox — YouTube Music API
 
-REST API for searching YouTube Music. Deploy on **Vercel**, call from **Flutter**, web, or any HTTP client.
+REST API for searching YouTube Music. Deploy search/docs on **Vercel**; run **local Express** for progressive MP3 streaming, lyrics, and the web player. Call from **Flutter**, web, or any HTTP client.
+
+**Local extras** (not on Vercel): progressive audio stream while converting, 25-minute MP3 cache, lyrics (LRCLIB), debounced search UI.
 
 ---
 
@@ -14,10 +16,10 @@ https://YOUR-PROJECT.vercel.app
 
 All API routes live under **`/api`**. Examples below use this base.
 
-| Environment | Base URL |
-|-------------|----------|
-| Production (Vercel) | `https://YOUR-PROJECT.vercel.app` |
-| Local | `http://localhost:3000` |
+| Environment | Base URL | Audio / lyrics |
+|-------------|----------|----------------|
+| Production (Vercel) | `https://YOUR-PROJECT.vercel.app` | Search + docs only (`/api/audio` → `501`) |
+| Local | `http://localhost:3000` | Full player + progressive MP3 + lyrics |
 
 ---
 
@@ -34,53 +36,55 @@ More detail: [DEPLOY.md](./DEPLOY.md)
 
 After deploy:
 
-- **`https://YOUR-PROJECT.vercel.app/`** — web demo (search + custom music player)
+- **`https://YOUR-PROJECT.vercel.app/`** — web demo (search; YouTube embed fallback for play)
 - **`https://YOUR-PROJECT.vercel.app/api`** — JSON API documentation
+
+For **real MP3 streaming**, run locally with `ffmpeg` + `yt-dlp` (see [Local development](#local-development)).
 
 ---
 
 ## Web demo — custom music player
 
-The **`public/index.html`** page is a small client that talks to this API and plays songs with **your own UI** (no visible YouTube controls).
+The **`public/index.html`** page talks to this API with a custom player UI (no visible YouTube controls).
 
 ### Flow
 
-1. **Search** — `GET /api/search?q=lofi&type=song` (or POST `/api/request` with `action: search`).
-2. **Pick a track** — each song in `response.items` includes a **`videoId`** (YouTube video ID).
-3. **Play** — the page loads the [YouTube IFrame Player API](https://developers.google.com/youtube/iframe_api_reference) in a **hidden** iframe (`controls: 0`) and drives playback from custom buttons (play/pause, seek, prev/next, volume).
-
-The API does **not** return a direct MP3/stream URL. Playback uses **`videoId`** with YouTube’s embed player behind your controls (same idea as the built-in demo).
+1. **Search** — debounced live search (`GET /api/search`) — metadata only, no conversion.
+2. **Pick a track** — each song includes a **`videoId`**.
+3. **Play (local)** — `GET /api/audio?videoId=...` returns **`streamUrl`** immediately. The player opens the progressive stream and starts audio after ~48KB is buffered while conversion continues for the **full** track. Lyrics load in parallel. On failure, falls back to a hidden YouTube player.
 
 ### Try it locally
 
 ```bash
+winget install ffmpeg
+pip install -U yt-dlp
 npm start
 ```
 
-Open **`http://localhost:3000/`**, search for a song, click a result. The bottom bar is the custom player.
+Open **`http://localhost:3000/`**, type a search (results appear as you type), click a song.
 
-### Minimal browser example (search → play one track)
+### Minimal browser example (search → progressive stream)
 
 ```html
 <script>
-  const API = "/api/search";
-
   async function searchAndPlay(query) {
-    const res = await fetch(`${API}?q=${encodeURIComponent(query)}&type=song`);
-    const data = await res.json();
-    if (data.status !== 200) throw new Error(data.message);
-
-    const song = data.response.items.find((i) => i.videoId);
+    const search = await fetch(`/api/search?q=${encodeURIComponent(query)}&type=song`).then((r) => r.json());
+    if (search.status !== 200) throw new Error(search.message);
+    const song = search.response.items.find((i) => i.videoId);
     if (!song) throw new Error("No playable songs");
 
-    // Use videoId with YouTube IFrame API (hidden player + your own UI)
-    console.log("Now playing:", song.title, song.videoId);
-    loadHiddenYoutubePlayer(song.videoId); // see public/index.html for full implementation
+    const audio = await fetch(`/api/audio?videoId=${encodeURIComponent(song.videoId)}`).then((r) => r.json());
+    if (audio.status !== 200) throw new Error(audio.message);
+
+    // Prefer streamUrl — plays while converting; audioUrl is the 25-min cache file
+    const url = audio.response.streamUrl || audio.response.audioUrl;
+    const el = new Audio(url);
+    await el.play();
   }
 </script>
 ```
 
-See **`public/index.html`** for the full player (queue, errors, suggestions, seek bar).
+See **`public/index.html`** for the full player (queue, converting spinner, lyrics, seek, YouTube fallback).
 
 ---
 
@@ -176,6 +180,8 @@ curl -X POST "https://YOUR-PROJECT.vercel.app/api/request" \
 | `album` | `browseId` or `id` |
 | `artist` | `browseId` or `id` |
 | `playlist` | `browseId` or `id` |
+| `audio` | `videoId` or `id` (**local Express only** — returns `streamUrl` + `audioUrl`) |
+| `lyrics` | `title`, `artist` (optional `q`, `durationSec`) |
 
 ---
 
@@ -254,6 +260,98 @@ curl "https://YOUR-PROJECT.vercel.app/api/playlist/VLPLTw3BBwcLBjG-4fernx2Xt-GHd
 
 ---
 
+### 9. Progressive MP3 audio (local Express only)
+
+Converts a selected YouTube `videoId` to MP3 with **progressive streaming**: playback can start while conversion continues. Requires **ffmpeg** + **yt-dlp** on PATH.
+
+| | |
+|---|---|
+| **Status / URLs** | `GET/POST http://localhost:3000/api/audio?videoId=AU9AdGIdWZs` |
+| **Progressive stream** | `GET http://localhost:3000/api/audio/stream/AU9AdGIdWZs` |
+| **Cached file** | `GET http://localhost:3000/audio/AU9AdGIdWZs.mp3` |
+| **Also** | `POST /api/request` with `{ "action": "audio", "videoId": "..." }` |
+
+**Prerequisite**
+
+```bash
+# Windows
+winget install ffmpeg
+pip install -U yt-dlp
+
+npm start
+```
+
+**Example**
+
+```bash
+curl "http://localhost:3000/api/audio?videoId=AU9AdGIdWZs"
+```
+
+```bash
+curl -X POST "http://localhost:3000/api/request" \
+  -H "Content-Type: application/json" \
+  -d "{\"action\":\"audio\",\"videoId\":\"AU9AdGIdWZs\"}"
+```
+
+Example response (immediate — does not wait for full conversion):
+
+```json
+{
+  "status": 200,
+  "message": "success",
+  "response": {
+    "videoId": "AU9AdGIdWZs",
+    "status": "streaming",
+    "converting": true,
+    "streamUrl": "http://localhost:3000/api/audio/stream/AU9AdGIdWZs",
+    "audioUrl": "http://localhost:3000/audio/AU9AdGIdWZs.mp3",
+    "contentType": "audio/mpeg",
+    "expiresAt": null,
+    "cached": false,
+    "ttlMinutes": 25
+  },
+  "meta": { "action": "audio", "videoId": "AU9AdGIdWZs", "status": "streaming" }
+}
+```
+
+**How progressive streaming works**
+
+1. One convert job per `videoId` writes a growing `tmp/audio/{id}.mp3.part` file (yt-dlp → ffmpeg).
+2. When ~48KB is ready, `GET /api/audio/stream/:videoId` starts chunked HTTP streaming to the client.
+3. The server keeps reading new bytes until the **full** track is converted, then renames to `{id}.mp3`.
+4. Later plays within **25 minutes** get `cached: true` and can use `audioUrl` (static file, better for seeking).
+
+**Efficient client flow**
+
+1. **Search** — metadata only (no convert). Results capped (~30). Short server-side cache.
+2. **Click play** — `GET /api/audio?videoId=...` → use `streamUrl` right away.
+3. **Play** — `new Audio(streamUrl)` / `just_audio` with `streamUrl`.
+4. **Optional** — when `status` is `ready` / `cached: true`, switch to `audioUrl`.
+
+Notes:
+
+- Search / lyrics never start conversion — only `/api/audio` + `/api/audio/stream` for the **selected** track.
+- Max **3** concurrent conversions (HTTP `503` if busy).
+- Temp files under `tmp/audio/` are deleted after **25 minutes**.
+- **Not supported on Vercel** (`501`).
+- Personal / development use only; respect YouTube ToS and copyright.
+
+### 10. Lyrics
+
+| | |
+|---|---|
+| **URL** | `http://localhost:3000/api/lyrics?title=Tum%20Mile&artist=Arijit%20Singh` |
+| **Method** | `GET` or `POST` |
+| **Also** | `POST /api/request` with `{ "action": "lyrics", "title": "...", "artist": "..." }` |
+
+```bash
+curl "http://localhost:3000/api/lyrics?title=Tum%20Mile&artist=Arijit%20Singh"
+```
+
+Returns `plainLyrics` / `syncedLyrics` from [LRCLIB](https://lrclib.net) when found (`found: true|false`). Cached briefly on the server.
+
+---
+
 ## Flutter — call API and play in a custom player
 
 Copy the client from [`flutter/wavebox_api.dart`](./flutter/wavebox_api.dart). More notes: [`flutter/README.md`](./flutter/README.md).
@@ -264,25 +362,59 @@ Copy the client from [`flutter/wavebox_api.dart`](./flutter/wavebox_api.dart). M
 |-------|-----------|
 | `title`, `artist`, `artists` | Labels in your player |
 | `thumbnail.url` | Album art |
-| `duration.label` | Total time (before YouTube reports duration) |
-| **`videoId`** | **Required for playback** (YouTube embed / iframe player) |
+| `duration.label` | Total time |
+| **`videoId`** | Pass to `/api/audio` (local) or YouTube embed (fallback) |
+| **`streamUrl`** | Progressive MP3 — play while converting (preferred) |
+| **`audioUrl`** | Cached file URL after conversion (25 min TTL) |
 
-There is **no** `/api/stream` endpoint. Build a custom player UI in Flutter and play each `videoId` with a hidden or chromeless YouTube player (recommended package: [`youtube_player_iframe`](https://pub.dev/packages/youtube_player_iframe)).
+### Preferred: progressive stream + `just_audio`
 
-### 1. Dependencies
+Point `baseUrl` at your **local** Wavebox server (`http://10.0.2.2:3000` on Android emulator, or your LAN IP).
 
 ```yaml
 dependencies:
   http: ^1.2.0
-  youtube_player_iframe: ^5.2.1
+  just_audio: ^0.9.40
 ```
 
-### 2. Search via Wavebox API
+```dart
+import 'package:http/http.dart' as http;
+import 'package:just_audio/just_audio.dart';
+import 'dart:convert';
+
+Future<String> fetchPlayableUrl(String baseUrl, String videoId) async {
+  final res = await http.post(
+    Uri.parse('$baseUrl/api/request'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'action': 'audio', 'videoId': videoId}),
+  );
+  final json = jsonDecode(res.body) as Map<String, dynamic>;
+  if (json['status'] != 200) {
+    throw Exception(json['message'] ?? 'audio failed');
+  }
+  final response = json['response'] as Map<String, dynamic>;
+  // streamUrl starts playback ASAP; audioUrl is the finished cache when ready
+  if (response['cached'] == true || response['status'] == 'ready') {
+    return response['audioUrl'] as String;
+  }
+  return (response['streamUrl'] ?? response['audioUrl']) as String;
+}
+
+final player = AudioPlayer();
+
+Future<void> playSong(String baseUrl, String videoId) async {
+  final url = await fetchPlayableUrl(baseUrl, videoId);
+  await player.setUrl(url);
+  await player.play();
+}
+```
+
+### Search via Wavebox API
 
 ```dart
 import 'package:your_app/services/wavebox_api.dart';
 
-final api = WaveboxApi(baseUrl: 'https://YOUR-PROJECT.vercel.app');
+final api = WaveboxApi(baseUrl: 'http://10.0.2.2:3000'); // or Vercel URL for search-only
 
 Future<List<SongItem>> fetchSongs(String query) async {
   try {
@@ -294,238 +426,17 @@ Future<List<SongItem>> fetchSongs(String query) async {
 }
 ```
 
-Equivalent **GET** (no POST body):
+Or GET without a POST body: `api.searchSongsGet('lofi', type: 'song')`.
 
-```dart
-final songs = await api.searchSongsGet('lofi', type: 'song');
-```
+### Fallback: YouTube embed (Vercel / no ffmpeg)
 
-Equivalent **curl**:
+If you only have Vercel, play with `videoId` via [`youtube_player_iframe`](https://pub.dev/packages/youtube_player_iframe) (hidden iframe + your own controls). Skip items without `videoId`; some videos block embedding.
 
-```bash
-curl "https://YOUR-PROJECT.vercel.app/api/search?q=lofi&type=song"
-```
+**Error handling**
 
-### 3. Custom player widget (hidden YouTube + your controls)
-
-```dart
-import 'package:flutter/material.dart';
-import 'package:youtube_player_iframe/youtube_player_iframe.dart';
-import 'package:your_app/services/wavebox_api.dart';
-
-class WaveboxPlayerScreen extends StatefulWidget {
-  const WaveboxPlayerScreen({super.key, required this.api});
-
-  final WaveboxApi api;
-
-  @override
-  State<WaveboxPlayerScreen> createState() => _WaveboxPlayerScreenState();
-}
-
-class _WaveboxPlayerScreenState extends State<WaveboxPlayerScreen> {
-  final _query = TextEditingController(text: 'lofi');
-  List<SongItem> _queue = [];
-  int _index = 0;
-  String? _error;
-  YoutubePlayerController? _yt;
-
-  @override
-  void dispose() {
-    _query.dispose();
-    _yt?.close();
-    super.dispose();
-  }
-
-  Future<void> _search() async {
-    setState(() => _error = null);
-    try {
-      final songs = await widget.api.searchSongs(_query.text.trim());
-      if (songs.isEmpty) {
-        setState(() => _error = 'No songs found.');
-        return;
-      }
-      setState(() {
-        _queue = songs;
-        _index = 0;
-      });
-      await _playCurrent();
-    } on WaveboxApiException catch (e) {
-      setState(() => _error = e.message);
-    } catch (e) {
-      setState(() => _error = e.toString());
-    }
-  }
-
-  Future<void> _playCurrent() async {
-    final song = _queue[_index];
-    final videoId = song.videoId;
-    if (videoId == null) {
-      setState(() => _error = 'Missing videoId for this track.');
-      return;
-    }
-
-    _yt?.close();
-    _yt = YoutubePlayerController.fromVideoId(
-      videoId: videoId,
-      autoPlay: true,
-      params: const YoutubePlayerParams(
-        showControls: false,
-        showFullscreenButton: false,
-        strictRelatedVideos: true,
-        mute: false,
-      ),
-    );
-
-    setState(() {});
-  }
-
-  SongItem get _now => _queue[_index];
-
-  @override
-  Widget build(BuildContext context) {
-    final song = _queue.isEmpty ? null : _now;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Wavebox')),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _query,
-                    decoration: const InputDecoration(labelText: 'Search'),
-                    onSubmitted: (_) => _search(),
-                  ),
-                ),
-                IconButton(onPressed: _search, icon: const Icon(Icons.search)),
-              ],
-            ),
-          ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
-            ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: _queue.length,
-              itemBuilder: (_, i) {
-                final s = _queue[i];
-                return ListTile(
-                  selected: i == _index,
-                  title: Text(s.title ?? 'Untitled'),
-                  subtitle: Text(s.artist ?? ''),
-                  onTap: () async {
-                    setState(() => _index = i);
-                    await _playCurrent();
-                  },
-                );
-              },
-            ),
-          ),
-          if (song != null && _yt != null) ...[
-            // Hidden iframe — audio/video plays here; UI is yours below
-            SizedBox(
-              height: 0,
-              child: YoutubePlayer(controller: _yt!, aspectRatio: 16 / 9),
-            ),
-            _CustomPlayerBar(
-              title: song.title ?? '',
-              artist: song.artist ?? '',
-              artUrl: song.thumbnail.url,
-              onPrev: _index > 0
-                  ? () async {
-                      setState(() => _index--);
-                      await _playCurrent();
-                    }
-                  : null,
-              onNext: _index < _queue.length - 1
-                  ? () async {
-                      setState(() => _index++);
-                      await _playCurrent();
-                    }
-                  : null,
-              onPlayPause: () => _yt!.playVideo(),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _CustomPlayerBar extends StatelessWidget {
-  const _CustomPlayerBar({
-    required this.title,
-    required this.artist,
-    required this.artUrl,
-    required this.onPlayPause,
-    this.onPrev,
-    this.onNext,
-  });
-
-  final String title;
-  final String artist;
-  final String? artUrl;
-  final VoidCallback onPlayPause;
-  final VoidCallback? onPrev;
-  final VoidCallback? onNext;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      elevation: 8,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            if (artUrl != null)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.network(artUrl!, width: 56, height: 56, fit: BoxFit.cover),
-              ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  Text(artist, maxLines: 1, overflow: TextOverflow.ellipsis),
-                ],
-              ),
-            ),
-            IconButton(onPressed: onPrev, icon: const Icon(Icons.skip_previous)),
-            IconButton(onPressed: onPlayPause, icon: const Icon(Icons.play_arrow)),
-            IconButton(onPressed: onNext, icon: const Icon(Icons.skip_next)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-```
-
-**Error handling tips**
-
-- Wrap API calls in `try/on WaveboxApiException` (network, 4xx/5xx, envelope `status != 200`).
-- Skip items without `videoId`.
-- Some videos block embedding — catch player errors and offer “Open in YouTube” using `https://www.youtube.com/watch?v=$videoId`.
-
-**App entry**
-
-```dart
-void main() {
-  runApp(MaterialApp(
-    home: WaveboxPlayerScreen(
-      api: WaveboxApi(baseUrl: 'https://YOUR-PROJECT.vercel.app'),
-    ),
-  ));
-}
-```
+- Wrap calls in `try / on WaveboxApiException`.
+- Prefer `streamUrl` for first play; use `audioUrl` when `cached: true` / `status: "ready"`.
+- On stream failure, fall back to YouTube embed or open `https://www.youtube.com/watch?v=$videoId`.
 
 ---
 
@@ -569,21 +480,32 @@ void main() {
 
 ## Local development
 
+1. Install **ffmpeg** and **yt-dlp** (required for progressive audio):
+
+```bash
+winget install ffmpeg
+pip install -U yt-dlp
+```
+
+2. Start the server:
+
 ```bash
 npm start
 ```
 
-Use the same paths with `http://localhost:3000`:
+Use these paths with `http://localhost:3000`:
 
 ```text
-http://localhost:3000/                              # web demo + custom player
+http://localhost:3000/                                   # web demo + custom player
+http://localhost:3000/api                                # JSON docs
 http://localhost:3000/api/health
 http://localhost:3000/api/request
 http://localhost:3000/api/search?q=pathaan&type=song
+http://localhost:3000/api/lyrics?title=...&artist=...
+http://localhost:3000/api/audio?videoId=AU9AdGIdWZs      # returns streamUrl + audioUrl
+http://localhost:3000/api/audio/stream/AU9AdGIdWZs       # progressive MP3 stream
+http://localhost:3000/audio/AU9AdGIdWZs.mp3              # cached file (after convert)
 ```
-
----
-
 
 ---
 
@@ -591,14 +513,18 @@ http://localhost:3000/api/search?q=pathaan&type=song
 
 | Endpoint | Example URL |
 |----------|-------------|
-| Web demo (custom player) | `https://YOUR-PROJECT.vercel.app/` |
-| API docs (JSON) | `https://YOUR-PROJECT.vercel.app/api` |
-| Health | `https://YOUR-PROJECT.vercel.app/api/health` |
-| **Gateway (POST JSON)** | `https://YOUR-PROJECT.vercel.app/api/request` |
-| Search | `https://YOUR-PROJECT.vercel.app/api/search?q=pathaan&type=song` |
-| Suggestions | `https://YOUR-PROJECT.vercel.app/api/suggestions?q=path` |
-| Album | `https://YOUR-PROJECT.vercel.app/api/album/:browseId` |
-| Artist | `https://YOUR-PROJECT.vercel.app/api/artist/:browseId` |
-| Playlist | `https://YOUR-PROJECT.vercel.app/api/playlist/:browseId` |
+| Web demo | `http://localhost:3000/` or `https://YOUR-PROJECT.vercel.app/` |
+| API docs (JSON) | `.../api` |
+| Health | `.../api/health` |
+| **Gateway (POST JSON)** | `.../api/request` |
+| Search | `.../api/search?q=pathaan&type=song` |
+| Suggestions | `.../api/suggestions?q=path` |
+| Lyrics | `.../api/lyrics?title=...&artist=...` |
+| **Audio status (local)** | `http://localhost:3000/api/audio?videoId=...` |
+| **Audio stream (local)** | `http://localhost:3000/api/audio/stream/:videoId` |
+| Cached MP3 (local) | `http://localhost:3000/audio/:videoId.mp3` |
+| Album | `.../api/album/:browseId` |
+| Artist | `.../api/artist/:browseId` |
+| Playlist | `.../api/playlist/:browseId` |
 
 CORS: `Access-Control-Allow-Origin: *` — safe to call from Flutter and browser apps.

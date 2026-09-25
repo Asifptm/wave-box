@@ -246,5 +246,38 @@ class WaveboxApi {
     return SearchResult.fromJson(json['response']).items;
   }
 
+  /// POST action: audio — starts conversion immediately (no wait).
+  /// Polls until status is `ready` and returns the payload (local Express + ffmpeg/yt-dlp).
+  Future<Map<String, dynamic>> getAudio(
+    String videoId, {
+    Duration pollInterval = const Duration(seconds: 1),
+    int maxAttempts = 90,
+  }) async {
+    var started = false;
+    for (var i = 0; i < maxAttempts; i++) {
+      final body = <String, dynamic>{
+        'action': 'audio',
+        'videoId': videoId,
+        if (started) 'start': '0',
+      };
+      started = true;
+      final json = await _postRequest(body);
+      final response = json['response'];
+      if (response is! Map<String, dynamic>) {
+        throw WaveboxApiException('Invalid audio response', status: 500);
+      }
+      final status = response['status'] as String? ?? '';
+      if (status == 'ready') return response;
+      if (status == 'error') {
+        throw WaveboxApiException(
+          response['error'] as String? ?? 'Conversion failed',
+          status: 500,
+        );
+      }
+      await Future<void>.delayed(pollInterval);
+    }
+    throw WaveboxApiException('Conversion timed out', status: 408);
+  }
+
   void close() => _client.close();
 }

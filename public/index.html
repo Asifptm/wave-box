@@ -34,7 +34,7 @@
       padding-bottom: calc(var(--player-h) + 1.5rem);
     }
 
-    body.player-open { --player-h: var(--player-bar); }
+    body.player-open { --player-h: 280px; }
 
     .bg {
       position: fixed;
@@ -521,6 +521,60 @@
 
     .player-error a { color: var(--accent); }
 
+    .player-loading {
+      display: none;
+      align-items: center;
+      gap: 0.65rem;
+      max-width: 820px;
+      margin: 0.55rem auto 0;
+      padding: 0.55rem 0.75rem;
+      border-radius: 10px;
+      background: rgba(0, 229, 199, 0.08);
+      border: 1px solid rgba(0, 229, 199, 0.25);
+      color: var(--accent);
+      font-size: 0.85rem;
+      text-align: left;
+    }
+
+    .player-loading.visible { display: flex; }
+
+    .player-loading .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(0, 229, 199, 0.25);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .lyrics-panel {
+      max-width: 820px;
+      margin: 0.65rem auto 0;
+      max-height: 110px;
+      overflow-y: auto;
+      text-align: left;
+      font-size: 0.82rem;
+      line-height: 1.45;
+      color: var(--muted);
+      white-space: pre-wrap;
+      padding: 0.35rem 0.15rem;
+    }
+
+    .lyrics-panel.empty { color: var(--muted); opacity: 0.75; }
+    .lyrics-panel .lyrics-label {
+      display: block;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+      margin-bottom: 0.35rem;
+    }
+
     footer {
       margin-top: 2rem;
       text-align: center;
@@ -591,6 +645,7 @@
   </main>
 
   <div id="yt-player-host" class="yt-host" aria-hidden="true"></div>
+  <audio id="html-audio" preload="auto" style="display:none"></audio>
 
   <aside id="player-dock" class="player-dock" aria-label="Now playing">
     <div class="player-layout">
@@ -630,6 +685,14 @@
       </div>
     </div>
     <p id="player-error" class="player-error"></p>
+    <div id="player-loading" class="player-loading" aria-live="polite">
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="player-loading-text">Converting audio…</span>
+    </div>
+    <div id="lyrics-panel" class="lyrics-panel empty" hidden>
+      <span class="lyrics-label">Lyrics</span>
+      <div id="lyrics-text"></div>
+    </div>
   </aside>
 
   <script>
@@ -642,6 +705,19 @@
         suggestions(q) {
           const params = new URLSearchParams({ q });
           return fetchJson("/api/suggestions?" + params);
+        },
+        audio(videoId, opts) {
+          const params = new URLSearchParams({ videoId });
+          if (opts && opts.start === false) params.set("start", "0");
+          return fetchJson("/api/audio?" + params);
+        },
+        lyrics(opts) {
+          const params = new URLSearchParams();
+          if (opts.title) params.set("title", opts.title);
+          if (opts.artist) params.set("artist", opts.artist);
+          if (opts.q) params.set("q", opts.q);
+          if (opts.durationSec) params.set("durationSec", String(opts.durationSec));
+          return fetchJson("/api/lyrics?" + params);
         },
       };
 
@@ -693,9 +769,17 @@
         btnPrev: document.getElementById("btn-prev"),
         btnNext: document.getElementById("btn-next"),
         volume: document.getElementById("volume"),
+        htmlAudio: document.getElementById("html-audio"),
+        playerLoading: document.getElementById("player-loading"),
+        playerLoadingText: document.getElementById("player-loading-text"),
+        lyricsPanel: document.getElementById("lyrics-panel"),
+        lyricsText: document.getElementById("lyrics-text"),
       };
 
       let suggestTimer = null;
+      let searchTimer = null;
+      let searchAbort = null;
+      let lastSearchQuery = "";
       let activeTrackKey = null;
       let queue = [];
       let queueIndex = -1;
@@ -704,6 +788,8 @@
       let progressTimer = null;
       let isSeeking = false;
       let currentWatchUrl = "";
+      /** @type {'html5' | 'youtube' | null} */
+      let playbackMode = null;
 
       const YT_STATE = { ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3, CUED: 5 };
 
@@ -786,19 +872,31 @@
 
       function startProgressTimer() {
         stopProgressTimer();
-        progressTimer = setInterval(updateProgress, 400);
+        progressTimer = setInterval(updateProgress, 750);
       }
 
       function updateProgress() {
-        if (!ytPlayer || !ytReady || isSeeking) return;
-        var cur = ytPlayer.getCurrentTime();
-        var dur = ytPlayer.getDuration();
-        if (!dur || !Number.isFinite(dur)) return;
-        var pct = Math.min(100, (cur / dur) * 100);
-        el.progressFill.style.width = pct + "%";
-        el.progressSeek.value = String(pct);
-        el.timeCurrent.textContent = formatTime(cur);
-        el.timeTotal.textContent = formatTime(dur);
+        if (isSeeking) return;
+        if (playbackMode === "html5" && el.htmlAudio) {
+          var cur = el.htmlAudio.currentTime || 0;
+          var dur = el.htmlAudio.duration || 0;
+          if (!dur || !Number.isFinite(dur)) return;
+          var pct = Math.min(100, (cur / dur) * 100);
+          el.progressFill.style.width = pct + "%";
+          el.progressSeek.value = String(pct);
+          el.timeCurrent.textContent = formatTime(cur);
+          el.timeTotal.textContent = formatTime(dur);
+          return;
+        }
+        if (!ytPlayer || !ytReady) return;
+        var yCur = ytPlayer.getCurrentTime();
+        var yDur = ytPlayer.getDuration();
+        if (!yDur || !Number.isFinite(yDur)) return;
+        var yPct = Math.min(100, (yCur / yDur) * 100);
+        el.progressFill.style.width = yPct + "%";
+        el.progressSeek.value = String(yPct);
+        el.timeCurrent.textContent = formatTime(yCur);
+        el.timeTotal.textContent = formatTime(yDur);
       }
 
       function onPlayerStateChange(ev) {
@@ -899,7 +997,10 @@
           return;
         }
 
-        items.forEach(function (item) {
+        const frag = document.createDocumentFragment();
+        const max = Math.min(items.length, 30);
+        for (let i = 0; i < max; i++) {
+          const item = items[i];
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "track";
@@ -907,7 +1008,7 @@
 
           const thumbUrl = item.thumbnail && item.thumbnail.url;
           const thumb = thumbUrl
-            ? '<img src="' + escapeHtml(thumbUrl) + '" alt="" loading="lazy" />'
+            ? '<img src="' + escapeHtml(thumbUrl) + '" alt="" loading="lazy" decoding="async" />'
             : '<div class="track-thumb-placeholder"><i class="fa-solid fa-music"></i></div>';
 
           const meta =
@@ -947,8 +1048,9 @@
             }
           });
 
-          el.results.appendChild(btn);
-        });
+          frag.appendChild(btn);
+        }
+        el.results.appendChild(frag);
       }
 
       async function runSearch(q, fromSuggestion) {
@@ -957,16 +1059,33 @@
         const type = el.type.value;
         const query = q.trim();
         if (!query) {
-          showError("Enter a search term.");
+          if (!fromSuggestion) showError("Enter a search term.");
           return;
         }
+
+        if (searchAbort) {
+          try {
+            searchAbort.abort();
+          } catch (_) {}
+        }
+        searchAbort = new AbortController();
+        lastSearchQuery = query;
 
         el.searchBtn.disabled = true;
         setStatus("Searching…", true);
 
         try {
-          const data = await API.search(query, type);
-          const items = Array.isArray(data.items) ? data.items : [];
+          const params = new URLSearchParams({ q: query, type });
+          const res = await fetch("/api/search?" + params, {
+            headers: { Accept: "application/json" },
+            signal: searchAbort.signal,
+          });
+          const envelope = await res.json();
+          if (query !== lastSearchQuery) return;
+          if (envelope.status !== 200 || envelope.response == null) {
+            throw new Error(envelope.message || "Search failed.");
+          }
+          const items = Array.isArray(envelope.response.items) ? envelope.response.items : [];
           setQueueFromItems(items);
           setStatus(items.length + " result" + (items.length === 1 ? "" : "s") + " · " + type);
           renderResults(items, query);
@@ -974,6 +1093,7 @@
             showError("No songs found. Try different keywords or switch result type.");
           }
         } catch (err) {
+          if (err && err.name === "AbortError") return;
           setStatus("");
           el.results.innerHTML = "";
           showError(err.message || "Search failed.");
@@ -1002,10 +1122,97 @@
         }
       }
 
-      function playTrack(item, trackEl) {
+      function stopHtmlAudio() {
+        if (!el.htmlAudio) return;
+        el.htmlAudio.pause();
+        el.htmlAudio.removeAttribute("src");
+        el.htmlAudio.load();
+      }
+
+      function playViaHtml5(audioUrl) {
+        playbackMode = "html5";
+        if (ytPlayer && ytReady) {
+          try {
+            ytPlayer.stopVideo();
+          } catch (_) {}
+        }
+        el.htmlAudio.volume = Math.min(1, Math.max(0, Number(el.volume.value) / 100));
+        el.htmlAudio.src = audioUrl;
+
+        var onReady = function () {
+          setPlayerLoading(false);
+          setStatus("");
+          el.btnPlay.disabled = false;
+          setPlayIcon(true);
+          startProgressTimer();
+          el.htmlAudio.removeEventListener("canplay", onReady);
+          el.htmlAudio.removeEventListener("playing", onReady);
+        };
+        el.htmlAudio.addEventListener("canplay", onReady);
+        el.htmlAudio.addEventListener("playing", onReady);
+
+        return el.htmlAudio.play().then(function () {
+          onReady();
+        });
+      }
+
+      function playViaYoutube(videoId) {
+        playbackMode = "youtube";
+        stopHtmlAudio();
+        return ensureYtPlayer().then(function (player) {
+          el.btnPlay.disabled = false;
+          player.loadVideoById(videoId);
+          setPlayIcon(true);
+          startProgressTimer();
+        });
+      }
+
+      function setPlayerLoading(visible, text) {
+        if (text) el.playerLoadingText.textContent = text;
+        el.playerLoading.classList.toggle("visible", !!visible);
+        document.body.classList.toggle("converting", !!visible);
+      }
+
+      function clearLyrics() {
+        el.lyricsPanel.hidden = true;
+        el.lyricsPanel.classList.add("empty");
+        el.lyricsText.textContent = "";
+      }
+
+      function showLyrics(text) {
+        el.lyricsPanel.hidden = false;
+        el.lyricsPanel.classList.toggle("empty", !text);
+        el.lyricsText.textContent = text || "No lyrics found for this track.";
+      }
+
+      function loadLyricsFor(item) {
+        const title = item.title || "";
+        const artist =
+          item.artist || (item.artists && item.artists.join(", ")) || "";
+        const durationSec =
+          item.duration && item.duration.seconds ? item.duration.seconds : null;
+
+        showLyrics("Loading lyrics…");
+        return API.lyrics({ title, artist, q: [title, artist].filter(Boolean).join(" "), durationSec })
+          .then(function (data) {
+            if (activeTrackKey !== item.videoId) return;
+            if (data.instrumental) {
+              showLyrics("(Instrumental)");
+              return;
+            }
+            showLyrics(data.plainLyrics || data.syncedLyrics || null);
+          })
+          .catch(function () {
+            if (activeTrackKey !== item.videoId) return;
+            showLyrics(null);
+          });
+      }
+
+      function playTrack(item) {
         hideError();
         el.playerError.classList.remove("visible");
         el.playerError.textContent = "";
+        clearLyrics();
 
         if (!item.videoId) {
           showError("Cannot play this track: missing video ID.");
@@ -1031,21 +1238,56 @@
         el.btnPlay.disabled = true;
         el.playerDock.classList.add("open");
         document.body.classList.add("player-open");
+        setPlayerLoading(true, "Buffering stream…");
+        setStatus("Streaming audio…", true);
+        loadLyricsFor(item);
 
-        ensureYtPlayer()
-          .then(function (player) {
-            el.btnPlay.disabled = false;
-            player.loadVideoById(item.videoId);
-            setPlayIcon(true);
-            startProgressTimer();
+        // Progressive stream — play as soon as bytes arrive; full track continues downloading.
+        API.audio(item.videoId)
+          .then(function (data) {
+            // Prefer finished cache file when ready (better seeking); else progressive stream.
+            var url =
+              data.cached || data.status === "ready"
+                ? data.audioUrl || data.streamUrl
+                : data.streamUrl || data.audioUrl;
+            if (!url) throw new Error("No stream URL returned.");
+            setPlayerLoading(
+              true,
+              data.cached || data.status === "ready"
+                ? "Loading cached audio…"
+                : "Buffering — will play while converting…"
+            );
+            return playViaHtml5(url);
+          })
+          .catch(function (err) {
+            setStatus("");
+            setPlayerLoading(false);
+            el.playerError.innerHTML =
+              escapeHtml(err.message || "Audio stream unavailable.") +
+              " Falling back to YouTube player.";
+            el.playerError.classList.add("visible");
+            return playViaYoutube(item.videoId);
           })
           .catch(function () {
-            showError("Could not initialize the audio player.");
+            setPlayerLoading(false);
+            showError("Could not play this track (stream and YouTube both failed).");
             el.btnPlay.disabled = false;
           });
       }
 
       function togglePlayPause() {
+        if (playbackMode === "html5" && el.htmlAudio) {
+          if (el.htmlAudio.paused) {
+            el.htmlAudio.play();
+            setPlayIcon(true);
+            startProgressTimer();
+          } else {
+            el.htmlAudio.pause();
+            setPlayIcon(false);
+            stopProgressTimer();
+          }
+          return;
+        }
         if (!ytPlayer || !ytReady) return;
         var state = ytPlayer.getPlayerState();
         if (state === YT_STATE.PLAYING) {
@@ -1058,7 +1300,7 @@
       function playAtIndex(index) {
         if (index < 0 || index >= queue.length) return;
         queueIndex = index;
-        playTrack(queue[index], null);
+        playTrack(queue[index]);
       }
 
       function playNext(fromEnded) {
@@ -1076,6 +1318,10 @@
 
       function closePlayer() {
         stopProgressTimer();
+        stopHtmlAudio();
+        playbackMode = null;
+        setPlayerLoading(false);
+        clearLyrics();
         if (ytPlayer && ytReady) {
           try {
             ytPlayer.stopVideo();
@@ -1127,15 +1373,23 @@
 
       el.form.addEventListener("submit", function (e) {
         e.preventDefault();
+        clearTimeout(searchTimer);
         runSearch(el.query.value, false);
       });
 
       el.query.addEventListener("input", function () {
         clearTimeout(suggestTimer);
+        clearTimeout(searchTimer);
         const q = el.query.value.trim();
         suggestTimer = setTimeout(function () {
           loadSuggestions(q);
-        }, 320);
+        }, 280);
+        // Debounced live search — results appear without waiting for Enter
+        if (q.length >= 2) {
+          searchTimer = setTimeout(function () {
+            runSearch(q, true);
+          }, 450);
+        }
       });
 
       el.query.addEventListener("blur", function () {
@@ -1151,7 +1405,11 @@
       });
 
       el.volume.addEventListener("input", function () {
-        if (ytPlayer && ytReady) ytPlayer.setVolume(Number(el.volume.value));
+        var vol = Number(el.volume.value);
+        if (playbackMode === "html5" && el.htmlAudio) {
+          el.htmlAudio.volume = Math.min(1, Math.max(0, vol / 100));
+        }
+        if (ytPlayer && ytReady) ytPlayer.setVolume(vol);
       });
 
       el.progressSeek.addEventListener("mousedown", function () {
@@ -1162,10 +1420,16 @@
       });
 
       function commitSeek() {
+        var pct = Number(el.progressSeek.value) / 100;
+        if (playbackMode === "html5" && el.htmlAudio && el.htmlAudio.duration) {
+          el.htmlAudio.currentTime = el.htmlAudio.duration * pct;
+          isSeeking = false;
+          updateProgress();
+          return;
+        }
         if (!ytPlayer || !ytReady) return;
         var dur = ytPlayer.getDuration();
         if (!dur) return;
-        var pct = Number(el.progressSeek.value) / 100;
         ytPlayer.seekTo(dur * pct, true);
         isSeeking = false;
         updateProgress();
@@ -1177,6 +1441,29 @@
       el.progressSeek.addEventListener("input", function () {
         if (!isSeeking) return;
         el.progressFill.style.width = el.progressSeek.value + "%";
+      });
+
+      el.htmlAudio.addEventListener("ended", function () {
+        setPlayIcon(false);
+        stopProgressTimer();
+        playNext(true);
+      });
+      el.htmlAudio.addEventListener("play", function () {
+        setPlayIcon(true);
+        startProgressTimer();
+      });
+      el.htmlAudio.addEventListener("pause", function () {
+        if (playbackMode === "html5") {
+          setPlayIcon(false);
+          stopProgressTimer();
+          updateProgress();
+        }
+      });
+      el.htmlAudio.addEventListener("error", function () {
+        if (playbackMode !== "html5") return;
+        el.playerError.textContent = "Failed to play MP3. Falling back to YouTube…";
+        el.playerError.classList.add("visible");
+        if (activeTrackKey) playViaYoutube(activeTrackKey).catch(function () {});
       });
 
       window.addEventListener("unhandledrejection", function (ev) {
