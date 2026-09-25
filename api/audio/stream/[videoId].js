@@ -1,6 +1,6 @@
-const { createHandler } = require("../../lib/vercel-handler");
-const { applyCors } = require("../../lib/http");
-const { sendError } = require("../../lib/response");
+const { createHandler } = require("../../../lib/vercel-handler");
+const { applyCors } = require("../../../lib/http");
+const { sendError } = require("../../../lib/response");
 
 async function handleAudioStreamVercel(_req, res) {
   applyCors(res);

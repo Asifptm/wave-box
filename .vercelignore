@@ -1,3 +1,6 @@
 flutter/
 node_modules/
 .git/
+tmp/
+*.md
+!README.md

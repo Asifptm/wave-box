@@ -1,5 +1,16 @@
 # Deploy Wavebox API to Vercel
 
+## What deploys on Vercel
+
+| Works on Vercel | Local Express only (`npm start`) |
+|-----------------|-----------------------------------|
+| Search, suggestions, album / artist / playlist | Progressive MP3 (`/api/audio`, `/api/audio/stream`) |
+| Health, API docs (`/api`) | Cached files under `/audio/*.mp3` |
+| Lyrics (`/api/lyrics`) | Full custom player streaming while converting |
+| Web demo at `/` (search + YouTube embed fallback) | Requires **ffmpeg** + **yt-dlp** |
+
+Audio endpoints return **`501`** on Vercel (including `POST /api/request` with `action: "audio"`).
+
 ## Prerequisites
 
 - [Node.js 18+](https://nodejs.org/)
@@ -18,9 +29,10 @@ npx vercel --prod   # production
 Vercel will detect:
 
 - **`api/*.js`** → serverless routes at `/api/*`
-- **`/`** → rewrites to `/api` (JSON documentation)
+- **`public/`** → static files (`/` → web demo via rewrite to `index.html`)
+- **`/api`** → JSON API documentation
 
-No build command required.
+No build command required. No environment variables required for basic search.
 
 ## Production URLs
 
@@ -32,11 +44,15 @@ https://<project-name>.vercel.app
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/` | GET | API docs JSON |
+| `/` | GET | Web demo (search; YouTube play fallback) |
+| `/api` | GET | API docs JSON |
 | `/api/health` | GET | Health check |
 | `/api/request` | POST | **Main entry** (Flutter uses this) |
 | `/api/search` | GET, POST | Song search |
 | `/api/suggestions` | GET, POST | Autocomplete |
+| `/api/lyrics` | GET, POST | Lyrics (LRCLIB) |
+| `/api/audio` | GET, POST | **501** — local only |
+| `/api/audio/stream/:videoId` | GET | **501** — local only |
 
 ### POST `/api/request` (recommended for mobile)
 
@@ -52,7 +68,8 @@ https://<project-name>.vercel.app
 
 See [`flutter/README.md`](flutter/README.md) and copy `flutter/wavebox_api.dart`.
 
-Set `baseUrl` to your Vercel production URL.
+- **Search on Vercel:** set `baseUrl` to your Vercel production URL.
+- **MP3 playback:** point `baseUrl` at a machine running `npm start` (with ffmpeg + yt-dlp), or use YouTube embed with `videoId`.
 
 ## Environment variables
 
@@ -65,6 +82,8 @@ Optional on Vercel dashboard → Project → Settings → Environment Variables 
 | Issue | Fix |
 |-------|-----|
 | 404 on `/api/search` | Redeploy; ensure `api/search.js` exists |
+| `/` shows wrong page | Confirm `public/index.html` and `vercel.json` rewrite `/` → `/index.html` |
+| `/api/audio` returns 501 | Expected on Vercel — run locally for MP3 |
 | Cold start slow | First request after idle may take 5–15s |
 | CORS from web | Headers already allow `*` |
 | Flutter on Android emulator calling `localhost` | Use `10.0.2.2:3000` for local API, not `localhost` |
