@@ -22,8 +22,13 @@ app.use(express.json({ limit: "256kb" }));
 app.use(express.urlencoded({ extended: true }));
 
 const publicDir = path.join(__dirname, "public");
-ensureAudioDir();
-startCleanupInterval();
+
+// Local Express only — never run on Vercel (read-only FS; use api/* serverless instead).
+const isVercel = Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
+if (!isVercel) {
+  ensureAudioDir();
+  startCleanupInterval();
+}
 
 const route = (routePath, handler) => {
   app.get(routePath, (req, res) => handler(req, res));

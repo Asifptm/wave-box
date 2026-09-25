@@ -28,6 +28,7 @@ npx vercel --prod   # production
 
 Vercel will detect:
 
+- **Framework:** Other (`framework: null` — not Express; `local-server.js` is local-only and ignored on deploy)
 - **`api/*.js`** → serverless routes at `/api/*`
 - **`public/`** → static files (`/` → web demo via rewrite to `index.html`)
 - **`/api`** → JSON API documentation
@@ -82,7 +83,7 @@ Optional on Vercel dashboard → Project → Settings → Environment Variables 
 | Issue | Fix |
 |-------|-----|
 | 404 on `/api/search` | Redeploy; ensure `api/search.js` exists |
-| `/` shows wrong page | Confirm `public/index.html` and `vercel.json` rewrite `/` → `/index.html` |
+| `/` shows INTERNAL_SERVER_ERROR | Redeploy with `framework: null` in `vercel.json` (do not run Express on Vercel). Ensure `public/index.html` is committed. |
 | `/api/audio` returns 501 | Expected on Vercel — run locally for MP3 |
 | Cold start slow | First request after idle may take 5–15s |
 | CORS from web | Headers already allow `*` |

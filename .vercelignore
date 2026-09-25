@@ -2,5 +2,6 @@ flutter/
 node_modules/
 .git/
 tmp/
+local-server.js
 *.md
 !README.md
