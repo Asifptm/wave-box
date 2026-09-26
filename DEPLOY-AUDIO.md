@@ -112,20 +112,27 @@ YouTube often blocks Railway/datacenter IPs. Conversion then fails and embed may
 
 ### Option A — YouTube cookies (recommended)
 
-1. On your PC, install a browser extension that exports **Netscape `cookies.txt`** for youtube.com (e.g. “Get cookies.txt LOCALLY”).
-2. Log into YouTube in that browser, export cookies for `.youtube.com`.
-3. On **Railway** → Variables, add a **Secret**:
+Railway single-line / Sealed vars often break multiline `cookies.txt`. Prefer **base64**:
+
+**On your PC (PowerShell):**
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("$env:USERPROFILE\Downloads\www.youtube.com_cookies.txt"))
+```
+
+(Use the real path of your exported cookies file.)
+
+Copy the long base64 string, then on **Railway** → Variables → **Sealed**:
 
 | Name | Value |
 |------|--------|
-| `YOUTUBE_COOKIES` | Paste the **full** cookies.txt file contents |
+| `YOUTUBE_COOKIES_B64` | paste the base64 string |
 
-4. Redeploy Railway.
-5. Test: `curl "https://wave-box-production.up.railway.app/api/audio?videoId=AU9AdGIdWZs"`
+Remove old `YOUTUBE_COOKIES` if you added it before (optional). Redeploy Railway.
 
-Or mount a file and set `YOUTUBE_COOKIES_FILE=/app/cookies.txt`.
+**Alternative (plain text):** `YOUTUBE_COOKIES` = full cookies.txt (only if Railway keeps newlines).
 
-Keep cookies private. Refresh them if conversion breaks again.
+Keep cookies private. Re-export if conversion breaks again.
 
 ### Option B — Update yt-dlp
 
