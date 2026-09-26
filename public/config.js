@@ -1,5 +1,5 @@
-// Hybrid: Vercel UI/search + Railway conversion host.
-// Leave audioBaseUrl empty for same-origin (local Docker / Railway-only).
+// Hybrid (Vercel UI): set audioBaseUrl to your Railway host, OR set WAVEBOX_AUDIO_URL on Vercel.
+// Same-origin (local / Railway full stack): leave audioBaseUrl empty.
 window.WAVEBOX_CONFIG = {
-  audioBaseUrl: "https://wave-box-production.up.railway.app",
+  audioBaseUrl: "",
 };

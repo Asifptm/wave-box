@@ -19,6 +19,7 @@ COPY local-server.js ./
 COPY scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
 
 RUN mkdir -p /app/tmp/audio \
+  && sed -i 's/\r$//' /app/scripts/docker-entrypoint.sh \
   && chmod +x /app/scripts/docker-entrypoint.sh \
   && chown -R node:node /app
 
@@ -29,7 +30,7 @@ ENV WAVEBOX_CONVERSION=1
 USER node
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${PORT}/api/health" || exit 1
 
-ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
+ENTRYPOINT ["/bin/sh", "/app/scripts/docker-entrypoint.sh"]
