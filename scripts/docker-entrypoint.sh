@@ -1,4 +1,6 @@
 #!/bin/sh
-# Best-effort refresh of yt-dlp on each container start (needs network).
-yt-dlp -U >/dev/null 2>&1 || true
+set -e
+# Prefer nightly yt-dlp for YouTube JS / challenge fixes.
+yt-dlp --update-to nightly >/tmp/yt-dlp-update.log 2>&1 || yt-dlp -U >/tmp/yt-dlp-update.log 2>&1 || true
+yt-dlp --version || true
 exec node local-server.js
