@@ -106,6 +106,33 @@ window.WAVEBOX_CONFIG = {
 
 Flutter: use the Docker host `baseUrl` for `getAudio` / play; use Vercel for search if you prefer.
 
+## Fix: “Sign in to confirm you're not a bot”
+
+YouTube often blocks Railway/datacenter IPs. Conversion then fails and embed may also fail for music videos.
+
+### Option A — YouTube cookies (recommended)
+
+1. On your PC, install a browser extension that exports **Netscape `cookies.txt`** for youtube.com (e.g. “Get cookies.txt LOCALLY”).
+2. Log into YouTube in that browser, export cookies for `.youtube.com`.
+3. On **Railway** → Variables, add a **Secret**:
+
+| Name | Value |
+|------|--------|
+| `YOUTUBE_COOKIES` | Paste the **full** cookies.txt file contents |
+
+4. Redeploy Railway.
+5. Test: `curl "https://wave-box-production.up.railway.app/api/audio?videoId=AU9AdGIdWZs"`
+
+Or mount a file and set `YOUTUBE_COOKIES_FILE=/app/cookies.txt`.
+
+Keep cookies private. Refresh them if conversion breaks again.
+
+### Option B — Update yt-dlp
+
+Redeploy the Docker image so Railway pulls a fresh `yt-dlp` build (Dockerfile installs latest on build).
+
+---
+
 ## Local without Docker
 
 ```bash

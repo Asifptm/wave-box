@@ -1,3 +1,5 @@
 tmp/
 node_modules/
 .test-*.json
+cookies.txt
+**/cookies.txt

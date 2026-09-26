@@ -1290,15 +1290,30 @@
           .catch(function (err) {
             setStatus("");
             setPlayerLoading(false);
+            var detail = err && err.message ? err.message : "Audio stream unavailable.";
             el.playerError.innerHTML =
-              escapeHtml(err.message || "Audio stream unavailable.") +
+              escapeHtml(detail) +
               " Falling back to YouTube player.";
             el.playerError.classList.add("visible");
-            return playViaYoutube(item.videoId);
+            return playViaYoutube(item.videoId).catch(function (ytErr) {
+              setPlayerLoading(false);
+              var watch =
+                currentWatchUrl ||
+                "https://www.youtube.com/watch?v=" + encodeURIComponent(item.videoId);
+              el.playerError.innerHTML =
+                escapeHtml(detail) +
+                ' Both stream and embed failed. <a href="' +
+                escapeHtml(watch) +
+                '" target="_blank" rel="noopener noreferrer">Open on YouTube</a>';
+              el.playerError.classList.add("visible");
+              showError(
+                "Could not play this track. YouTube blocked conversion on the server (often needs cookies). Use Open on YouTube below."
+              );
+              el.btnPlay.disabled = false;
+              throw ytErr;
+            });
           })
           .catch(function () {
-            setPlayerLoading(false);
-            showError("Could not play this track (stream and YouTube both failed).");
             el.btnPlay.disabled = false;
           });
       }
