@@ -695,8 +695,21 @@
     </div>
   </aside>
 
+  <script src="/config.js"></script>
   <script>
     (function () {
+      let audioBase = "";
+      try {
+        if (window.WAVEBOX_CONFIG && window.WAVEBOX_CONFIG.audioBaseUrl) {
+          audioBase = String(window.WAVEBOX_CONFIG.audioBaseUrl).replace(/\/$/, "");
+        }
+      } catch (_) {}
+
+      function withAudioHost(path) {
+        if (!audioBase) return path;
+        return audioBase + path;
+      }
+
       const API = {
         search(q, type) {
           const params = new URLSearchParams({ q, type });
@@ -709,7 +722,7 @@
         audio(videoId, opts) {
           const params = new URLSearchParams({ videoId });
           if (opts && opts.start === false) params.set("start", "0");
-          return fetchJson("/api/audio?" + params);
+          return fetchJson(withAudioHost("/api/audio?" + params));
         },
         lyrics(opts) {
           const params = new URLSearchParams();
@@ -719,7 +732,22 @@
           if (opts.durationSec) params.set("durationSec", String(opts.durationSec));
           return fetchJson("/api/lyrics?" + params);
         },
+        health() {
+          return fetchJson("/api/health");
+        },
       };
+
+      async function initAudioHost() {
+        if (audioBase) return;
+        try {
+          const health = await API.health();
+          if (health && health.audioBaseUrl) {
+            audioBase = String(health.audioBaseUrl).replace(/\/$/, "");
+          }
+        } catch (_) {
+          /* same-origin audio */
+        }
+      }
 
       async function fetchJson(url) {
         let res;
@@ -1470,7 +1498,13 @@
         showError(ev.reason && ev.reason.message ? ev.reason.message : "Something went wrong.");
       });
 
-      setStatus("Try searching for “lofi” or “jazz”.");
+      initAudioHost().finally(function () {
+        setStatus(
+          audioBase
+            ? "Audio host: " + audioBase + " — try searching for “lofi”."
+            : "Try searching for “lofi” or “jazz”."
+        );
+      });
     })();
   </script>
 </body>

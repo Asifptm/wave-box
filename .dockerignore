@@ -1,0 +1,14 @@
+node_modules
+.tmp
+tmp
+.git
+.vercel
+flutter
+*.md
+!README.md
+sdjfsjd.png
+.test-*.json
+api
+vercel.json
+.vercelignore
+DEPLOY.md

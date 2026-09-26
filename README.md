@@ -1,8 +1,8 @@
 # Wavebox — YouTube Music API
 
-REST API for searching YouTube Music. Deploy search/docs on **Vercel**; run **local Express** for progressive MP3 streaming, lyrics, and the web player. Call from **Flutter**, web, or any HTTP client.
+REST API for searching YouTube Music. Deploy search/docs on **Vercel**; run **Docker / local Express** for progressive MP3 conversion. Call from **Flutter**, web, or any HTTP client.
 
-**Local extras** (not on Vercel): progressive audio stream while converting, 25-minute MP3 cache, lyrics (LRCLIB), debounced search UI.
+**Conversion** (ffmpeg + yt-dlp): local `npm start` or `docker compose up` — not on Vercel serverless.
 
 ---
 
@@ -16,14 +16,28 @@ https://YOUR-PROJECT.vercel.app
 
 All API routes live under **`/api`**. Examples below use this base.
 
-| Environment | Base URL | Audio / lyrics |
-|-------------|----------|----------------|
+| Environment | Base URL | Audio conversion |
+|-------------|----------|------------------|
 | Production (Vercel) | `https://YOUR-PROJECT.vercel.app` | Search + docs only (`/api/audio` → `501`) |
-| Local | `http://localhost:3000` | Full player + progressive MP3 + lyrics |
+| Docker / local Express | `http://localhost:3000` or your Railway/Render URL | Progressive MP3 + lyrics |
+| Hybrid | Vercel UI + `WAVEBOX_AUDIO_URL` → Docker host | Search on Vercel, convert on Docker |
 
 ---
 
-## Deploy to Vercel
+## Production conversion (Docker)
+
+```bash
+docker compose up --build
+# open http://localhost:3000/
+```
+
+Deploy the same image to **Railway / Render / Fly / any VPS**. Full guide: [DEPLOY-AUDIO.md](./DEPLOY-AUDIO.md).
+
+Hybrid with Vercel: set env `WAVEBOX_AUDIO_URL=https://YOUR-AUDIO-HOST` on the Vercel project (or edit `public/config.js`).
+
+---
+
+## Deploy to Vercel (search only)
 
 ```bash
 npm install
@@ -39,7 +53,7 @@ After deploy:
 - **`https://YOUR-PROJECT.vercel.app/`** — web demo (search; YouTube embed fallback for play)
 - **`https://YOUR-PROJECT.vercel.app/api`** — JSON API documentation
 
-For **real MP3 streaming**, run locally with `ffmpeg` + `yt-dlp` (see [Local development](#local-development)).
+For **real MP3 streaming**, use Docker (above) or local `npm start` with `ffmpeg` + `yt-dlp`.
 
 ---
 
@@ -480,7 +494,15 @@ If you only have Vercel, play with `videoId` via [`youtube_player_iframe`](https
 
 ## Local development
 
-1. Install **ffmpeg** and **yt-dlp** (required for progressive audio):
+**Option A — Docker (includes ffmpeg + yt-dlp):**
+
+```bash
+docker compose up --build
+```
+
+**Option B — Node on your machine:**
+
+1. Install **ffmpeg** and **yt-dlp**:
 
 ```bash
 winget install ffmpeg

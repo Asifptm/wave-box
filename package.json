@@ -7,7 +7,10 @@
   },
   "main": "local-server.js",
   "scripts": {
-    "start": "node local-server.js"
+    "start": "node local-server.js",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down"
   },
   "license": "ISC",
   "type": "commonjs",

@@ -18,6 +18,9 @@ const { AUDIO_DIR, ensureAudioDir, startCleanupInterval } = require("./lib/audio
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Correct proto/host behind Railway, Render, Fly, nginx, etc.
+app.set("trust proxy", 1);
+
 app.use(express.json({ limit: "256kb" }));
 app.use(express.urlencoded({ extended: true }));
 

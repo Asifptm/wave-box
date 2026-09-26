@@ -74,9 +74,17 @@ See [`flutter/README.md`](flutter/README.md) and copy `flutter/wavebox_api.dart`
 
 ## Environment variables
 
-None required for basic operation.
+| Variable | Where | Purpose |
+|----------|--------|---------|
+| `WAVEBOX_AUDIO_URL` | Vercel | Public URL of Docker audio host (web demo uses it for `/api/audio`) |
+| `PUBLIC_BASE_URL` | Docker host | Force absolute `streamUrl` / `audioUrl` behind proxies |
+| `WAVEBOX_CONVERSION` | Docker | `1` enable (default in Dockerfile); `0` disable |
 
-Optional on Vercel dashboard → Project → Settings → Environment Variables if you add features later.
+None required for basic Vercel search.
+
+## Production MP3 conversion
+
+See **[DEPLOY-AUDIO.md](./DEPLOY-AUDIO.md)** — Docker Compose, Railway/Render/Fly, and hybrid Vercel + audio host.
 
 ## Troubleshooting
 
@@ -84,7 +92,7 @@ Optional on Vercel dashboard → Project → Settings → Environment Variables 
 |-------|-----|
 | 404 on `/api/search` | Redeploy; ensure `api/search.js` exists |
 | `/` shows INTERNAL_SERVER_ERROR | Redeploy with `framework: null` in `vercel.json` (do not run Express on Vercel). Ensure `public/index.html` is committed. |
-| `/api/audio` returns 501 | Expected on Vercel — run locally for MP3 |
+| `/api/audio` returns 501 | Expected on Vercel — run Docker (`DEPLOY-AUDIO.md`) or set `WAVEBOX_AUDIO_URL` |
 | Cold start slow | First request after idle may take 5–15s |
 | CORS from web | Headers already allow `*` |
 | Flutter on Android emulator calling `localhost` | Use `10.0.2.2:3000` for local API, not `localhost` |
